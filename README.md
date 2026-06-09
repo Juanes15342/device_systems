@@ -42,30 +42,6 @@ http://127.0.0.1:8000/docs
 
 ---
 
-## Estructura del proyecto
-device_systems/
-│── app/
-│   │── main.py
-│   │── database/
-│   │   └── connection.py
-│   │── models/
-│   │   └── user_model.py
-│   │── routes/
-│   │   └── user_routes.py
-│   │── schemas/
-│   │   └── user_schema.py
-│   │── services/
-│   │   └── user_service.py
-│   │── dependencies/
-│   │   │── user_dependencies.py
-│   │   └── database_dependency.py
-│   └── data/
-│       └── users_db.py
-│── img/
-│── requirements.txt
-└── README.md
-
----
 
 ##  Tabla de endpoints
 
