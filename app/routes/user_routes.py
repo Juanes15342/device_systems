@@ -1,60 +1,113 @@
-from fastapi import APIRouter, HTTPException, Query, Response
-from app.schemas.user_schema import UserCreate, UserResponse, RoleEnum
+from fastapi import APIRouter, Query, Response, Depends
+from sqlalchemy.orm import Session
+from app.schemas.user_schema import UserCreate, UserResponse, UserUpdate, RoleEnum
+from app.services import user_service
+from app.dependencies.database_dependency import agregar_cabeceras
+from app.dependencies.database_dependency import get_db
 from typing import Optional
 
 router = APIRouter()
 
-# Base de datos simulada en memoria
-usuarios_db: list[dict] = [
-    {"id": 1, "name": "Carlos Admin", "email": "carlos@mail.com", "role": "admin", "is_active": True},
-    {"id": 2, "name": "Laura Support", "email": "laura@mail.com", "role": "support", "is_active": True},
-    {"id": 3, "name": "Pedro User", "email": "pedro@mail.com", "role": "user", "is_active": False},
-]
-
-def agregar_cabeceras(response: Response):
-    response.headers["X-App-Name"] = "device_systems"
-    response.headers["X-API-Version"] = "1.0"
-
-
-# GET /users — listar todos, con filtros opcionales
-@router.get("/users", response_model=list[UserResponse])
+@router.get(
+    "/users",
+    response_model=list[UserResponse],
+    status_code=200,
+    summary="Listar usuarios",
+    description="Retorna todos los usuarios. Permite filtrar por rol y estado, y ordenar resultados."
+)
 def listar_usuarios(
     response: Response,
-    role: Optional[RoleEnum] = Query(default=None, description="Filtrar por rol"),
-    is_active: Optional[bool] = Query(default=None, description="Filtrar por estado activo")
+    db: Session = Depends(get_db),
+    role: Optional[RoleEnum] = Query(default=None, description="Filtrar por rol: admin, support, user"),
+    is_active: Optional[bool] = Query(default=None, description="Filtrar por estado: true o false"),
+    order_by: Optional[str] = Query(default="id", description="Ordenar por: id, name, created_at")
 ):
     agregar_cabeceras(response)
-    resultado = usuarios_db
-
-    if role is not None:
-        resultado = [u for u in resultado if u["role"] == role]
-    if is_active is not None:
-        resultado = [u for u in resultado if u["is_active"] == is_active]
-
-    return resultado
+    return user_service.obtener_todos(db, role=role, is_active=is_active, order_by=order_by)
 
 
-# GET /users/{user_id} — buscar por ID
-@router.get("/users/{user_id}", response_model=UserResponse)
-def obtener_usuario(user_id: int, response: Response):
+@router.get(
+    "/users/{user_id}",
+    response_model=UserResponse,
+    status_code=200,
+    summary="Obtener usuario por ID",
+    description="Retorna un usuario específico. Responde 404 si no existe.",
+    responses={404: {"description": "Usuario no encontrado"}}
+)
+def obtener_usuario(user_id: int, response: Response, db: Session = Depends(get_db)):
     agregar_cabeceras(response)
-    for usuario in usuarios_db:
-        if usuario["id"] == user_id:
-            return usuario
-    raise HTTPException(status_code=404, detail=f"Usuario con id {user_id} no encontrado")
+    return user_service.obtener_por_id(db, user_id)
 
 
-# POST /users — crear nuevo usuario
-@router.post("/users", response_model=UserResponse, status_code=201)
-def crear_usuario(usuario: UserCreate, response: Response):
+@router.post(
+    "/users",
+    response_model=UserResponse,
+    status_code=201,
+    summary="Crear usuario",
+    description="Crea un nuevo usuario. El email debe ser único. Valida todos los campos con Pydantic.",
+    responses={
+        201: {"description": "Usuario creado correctamente"},
+        400: {"description": "Email duplicado"},
+        422: {"description": "Error de validación"}
+    }
+)
+def crear_usuario(usuario: UserCreate, response: Response, db: Session = Depends(get_db)):
     agregar_cabeceras(response)
+    return user_service.crear_usuario(db, usuario)
 
-    # Verificar email duplicado
-    for u in usuarios_db:
-        if u["email"] == usuario.email:
-            raise HTTPException(status_code=400, detail="El correo ya está registrado")
 
-    nuevo_id = max(u["id"] for u in usuarios_db) + 1
-    nuevo_usuario = {"id": nuevo_id, **usuario.model_dump()}
-    usuarios_db.append(nuevo_usuario)
-    return nuevo_usuario
+@router.put(
+    "/users/{user_id}",
+    response_model=UserResponse,
+    status_code=200,
+    summary="Actualizar usuario completo",
+    description="Reemplaza completamente los datos de un usuario. Todos los campos son obligatorios.",
+    responses={
+        404: {"description": "Usuario no encontrado"},
+        400: {"description": "Email duplicado"}
+    }
+)
+def actualizar_usuario(
+    user_id: int,
+    usuario: UserCreate,
+    response: Response,
+    db: Session = Depends(get_db)
+):
+    agregar_cabeceras(response)
+    return user_service.actualizar_usuario(db, user_id, usuario)
+
+
+@router.patch(
+    "/users/{user_id}",
+    response_model=UserResponse,
+    status_code=200,
+    summary="Actualizar usuario parcialmente",
+    description="Modifica solo los campos enviados. Mínimo un campo requerido.",
+    responses={
+        400: {"description": "Sin campos para actualizar o email duplicado"},
+        404: {"description": "Usuario no encontrado"}
+    }
+)
+def actualizar_parcial(
+    user_id: int,
+    datos: UserUpdate,
+    response: Response,
+    db: Session = Depends(get_db)
+):
+    agregar_cabeceras(response)
+    return user_service.actualizar_parcial(db, user_id, datos)
+
+
+@router.delete(
+    "/users/{user_id}",
+    status_code=204,
+    summary="Eliminar usuario",
+    description="Elimina un usuario por ID. Responde 204 sin cuerpo si fue exitoso.",
+    responses={
+        204: {"description": "Usuario eliminado correctamente"},
+        404: {"description": "Usuario no encontrado"}
+    }
+)
+def eliminar_usuario(user_id: int, response: Response, db: Session = Depends(get_db)):
+    agregar_cabeceras(response)
+    user_service.eliminar_usuario(db, user_id)
