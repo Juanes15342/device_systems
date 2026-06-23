@@ -5,8 +5,15 @@ from app.services import user_service
 from app.dependencies.database_dependency import agregar_cabeceras
 from app.dependencies.database_dependency import get_db
 from typing import Optional
+from app.schemas.loan_schema import LoanResponse
+from app.services import loan_service
 
 router = APIRouter()
+
+@router.get("/users/{user_id}/loans", response_model=list[LoanResponse], status_code=200)
+def loans_de_usuario(user_id: int, response: Response, db: Session = Depends(get_db)):
+    agregar_cabeceras(response)
+    return loan_service.obtener_loans_por_usuario(db, user_id)
 
 @router.get(
     "/users",
