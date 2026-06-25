@@ -6,6 +6,9 @@ from app.dependencies.user_dependencies import agregar_cabeceras
 from app.dependencies.database_dependency import get_db
 from typing import Optional
 from app.schemas.loan_schema import LoanDetailResponse
+from app.dependencies.auth_dependency import get_current_active_user, require_admin_or_support
+from fastapi import APIRouter, Query, Response, Depends, Request
+from app.middlewares.rate_limiter import limiter
 
 router = APIRouter()
 
@@ -28,34 +31,26 @@ def obtener_loan(loan_id: int, response: Response, db: Session = Depends(get_db)
     response_model=LoanResponse,
     status_code=201,
     summary="Crear un préstamo",
-    description="Registra un nuevo préstamo. Valida que el usuario y el dispositivo existan, "
-                "y que el dispositivo esté disponible. Marca el dispositivo como no disponible.",
-    response_description="Préstamo creado correctamente",
-    responses={
-        404: {"description": "Usuario o dispositivo no encontrado"},
-        409: {"description": "El dispositivo no está disponible"},
-        422: {"description": "Error de validación"}
-    }
+    description="Registra un nuevo préstamo. Límite: 10 solicitudes por minuto."
 )
-def crear_loan(loan: LoanCreate, response: Response, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def crear_loan(
+    request: Request,
+    loan: LoanCreate,
+    response: Response,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_active_user)
+):
     agregar_cabeceras(response)
     return loan_service.crear_loan(db, loan)
 
-
-@router.patch(
-    "/loans/{loan_id}/return",
-    response_model=LoanResponse,
-    status_code=200,
-    summary="Devolver un préstamo",
-    description="Marca un préstamo como devuelto, asigna la fecha de devolución "
-                "y libera el dispositivo (is_available = true).",
-    response_description="Préstamo devuelto correctamente",
-    responses={
-        404: {"description": "Préstamo no encontrado"},
-        409: {"description": "El préstamo ya fue devuelto anteriormente"}
-    }
-)
-def devolver_loan(loan_id: int, response: Response, db: Session = Depends(get_db)):
+@router.patch("/loans/{loan_id}/return", response_model=LoanResponse, status_code=200)
+def devolver_loan(
+    loan_id: int,
+    response: Response,
+    db: Session = Depends(get_db),
+    current_user = Depends(require_admin_or_support)
+):
     agregar_cabeceras(response)
     return loan_service.devolver_loan(db, loan_id)
 
@@ -63,9 +58,10 @@ def devolver_loan(loan_id: int, response: Response, db: Session = Depends(get_db
 def detalles_loans(
     response: Response,
     db: Session = Depends(get_db),
+    current_user = Depends(require_admin_or_support),
     status: Optional[LoanStatusEnum] = Query(default=None),
-    user_email: Optional[str] = Query(default=None, description="Buscar por email del usuario"),
-    device_type: Optional[str] = Query(default=None, description="Buscar por tipo de dispositivo")
+    user_email: Optional[str] = Query(default=None),
+    device_type: Optional[str] = Query(default=None)
 ):
     agregar_cabeceras(response)
     return loan_service.obtener_detalles(db, status=status, user_email=user_email, device_type=device_type)

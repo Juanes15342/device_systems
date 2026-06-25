@@ -5,6 +5,7 @@ from app.services import device_service
 from app.dependencies.user_dependencies import agregar_cabeceras
 from app.dependencies.database_dependency import get_db
 from typing import Optional
+from app.dependencies.auth_dependency import require_admin_or_support, require_admin
 
 router = APIRouter()
 
@@ -28,12 +29,23 @@ def obtener_device(device_id: int, response: Response, db: Session = Depends(get
     return device_service.obtener_por_id(db, device_id)
 
 @router.post("/devices", response_model=DeviceResponse, status_code=201)
-def crear_device(device: DeviceCreate, response: Response, db: Session = Depends(get_db)):
+def crear_device(
+    device: DeviceCreate,
+    response: Response,
+    db: Session = Depends(get_db),
+    current_user = Depends(require_admin_or_support)
+):
     agregar_cabeceras(response)
     return device_service.crear_device(db, device)
 
 @router.put("/devices/{device_id}", response_model=DeviceResponse, status_code=200)
-def actualizar_device(device_id: int, device: DeviceCreate, response: Response, db: Session = Depends(get_db)):
+def actualizar_device(
+    device_id: int,
+    device: DeviceCreate,
+    response: Response,
+    db: Session = Depends(get_db),
+    current_user = Depends(require_admin_or_support)
+):
     agregar_cabeceras(response)
     return device_service.actualizar_device(db, device_id, device)
 
@@ -43,6 +55,11 @@ def actualizar_parcial(device_id: int, datos: DeviceUpdate, response: Response, 
     return device_service.actualizar_parcial(db, device_id, datos)
 
 @router.delete("/devices/{device_id}", status_code=204)
-def eliminar_device(device_id: int, response: Response, db: Session = Depends(get_db)):
+def eliminar_device(
+    device_id: int,
+    response: Response,
+    db: Session = Depends(get_db),
+    current_user = Depends(require_admin)
+):
     agregar_cabeceras(response)
     device_service.eliminar_device(db, device_id)

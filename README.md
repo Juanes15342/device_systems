@@ -1,76 +1,58 @@
 # device_systems API
 
-API REST construida con FastAPI, SQLAlchemy y Alembic para la gestión de usuarios, dispositivos y préstamos del sistema device_systems.
+API REST construida con FastAPI, SQLAlchemy, Alembic y seguridad OAuth2/JWT para la gestión de usuarios, dispositivos y préstamos del sistema device_systems.
 
 ---
 
-## Tecnologías utilizadas
+##  Tecnologías utilizadas
 
-- Python 3.x
-- FastAPI
-- Uvicorn
+- Python 3.x · FastAPI · Uvicorn
+- SQLAlchemy · Alembic · SQLite
 - Pydantic v2
-- SQLAlchemy
-- Alembic (migraciones)
-- SQLite
+- Passlib (bcrypt) · python-jose (JWT)
+- Slowapi (rate limiting)
 
 ---
 
-##  Instalación de dependencias
+##  Instalación
 
 ```bash
 git clone https://github.com/TU_USUARIO/device_systems.git
 cd device_systems
-git checkout device_systems_alembic_relaciones
+git checkout device_systems_security
 python -m venv fastapi_env
 .\fastapi_env\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
+### Variables de entorno
+
+Copia `.env.example` a `.env` y completa tus valores:
+
+```env
+SECRET_KEY=tu_clave_secreta_larga_y_aleatoria
+ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=30
+```
+
+>  El archivo `.env` nunca se sube al repositorio (está en `.gitignore`). Solo `.env.example` se versiona, como plantilla.
+
 ---
 
-## Migraciones con Alembic
-
-### Inicialización de Alembic
-
-Se inicializó Alembic en la raíz del proyecto para gestionar el versionado de la base de datos:
-
-```bash
-alembic init alembic
-```
-
-### Configuración
-
-Se configuró `alembic.ini` con la URL de conexión a SQLite:
-```ini
-sqlalchemy.url = sqlite:///./device_systems.db
-```
-
-Y se configuró `alembic/env.py` para reconocer la metadata de SQLAlchemy y los modelos del proyecto (`User`, `Device`, `Loan`).
-
-### Generación de migraciones
-
-```bash
-alembic revision --autogenerate -m "create devices and loans tables"
-```
-
-![Alembic Revision](img/alembic_revision.png)
-
-### Aplicación de migraciones
+## 🗄️ Migraciones con Alembic
 
 ```bash
 alembic upgrade head
 ```
 
-![Alembic Upgrade](img/alembic_upgrade.png)
-
-### Historial de migraciones
+Se generó una migración para añadir los campos de autenticación al modelo `User`:
 
 ```bash
-alembic history
+alembic revision --autogenerate -m "add authentication fields to users"
+alembic upgrade head
 ```
 
-![Tablas Generadas](img/tablas_generadas.png)
+![Migración Alembic](img/alembic_auth_migration.png)
 
 ---
 
@@ -79,22 +61,28 @@ alembic history
 ```bash
 uvicorn app.main:app --reload
 ```
-
-Documentación interactiva disponible en:
 http://127.0.0.1:8000/docs
 
 http://127.0.0.1:8000/redoc
 
-![Swagger General](img/swagger_general.png)
-
 ---
 
-## 🗂️ Estructura del proyecto
+## Estructura del proyecto
+
+![Estructura del proyecto](img/estructura_proyecto.png)
 device_systems/
 
 │── app/
 
 │   │── main.py
+
+│   │── auth/
+
+│   │   │── auth_routes.py
+
+│   │   │── auth_service.py
+
+│   │   └── security.py
 
 │   │── database/
 
@@ -114,7 +102,9 @@ device_systems/
 
 │   │   │── device_schema.py
 
-│   │   └── loan_schema.py
+│   │   │── loan_schema.py
+
+│   │   └── auth_schema.py
 
 │   │── routes/
 
@@ -132,15 +122,25 @@ device_systems/
 
 │   │   └── loan_service.py
 
-│   └── dependencies/
+│   │── dependencies/
 
-│       │── user_dependencies.py
+│   │   │── database_dependency.py
 
-│       └── database_dependency.py
+│   │   │── user_dependencies.py
+
+│   │   └── auth_dependency.py
+
+│   └── middlewares/
+
+│       │── request_middleware.py
+
+│       └── rate_limiter.py
 
 │── alembic/
 
 │   └── versions/
+
+│── .env.example
 
 │── alembic.ini
 
@@ -152,132 +152,135 @@ device_systems/
 
 ---
 
-## Modelos y asociaciones
+##  Autenticación y autorización
 
-- **User** — usuarios del sistema (`id`, `name`, `email`, `role`, `is_active`, `created_at`)
-- **Device** — dispositivos disponibles para préstamo (`id`, `name`, `serial_number`, `device_type`, `brand`, `is_available`, `created_at`)
-- **Loan** — préstamos que relacionan usuarios y dispositivos (`id`, `user_id`, `device_id`, `loan_date`, `return_date`, `status`)
+### Roles disponibles
+`admin` · `support` · `user`
 
-### Relaciones
+### Endpoints de autenticación
+
+| Método | Endpoint | Descripción | Límite |
+|--------|----------|-------------|--------|
+| POST | /api/v1/auth/register | Registra un usuario nuevo | 3/min |
+| POST | /api/v1/auth/login | Autentica y retorna JWT | 5/min |
+| GET | /api/v1/auth/me | Datos del usuario autenticado | — |
+
+### Protección por ruta
+
+| Ruta | Protección requerida |
+|------|----------------------|
+| GET /users | Usuario autenticado |
+| GET /users/{id} | Usuario autenticado |
+| POST /devices | Admin o support |
+| PUT /devices/{id} | Admin o support |
+| DELETE /devices/{id} | Admin |
+| POST /loans | Usuario autenticado |
+| PATCH /loans/{id}/return | Admin o support |
+| GET /loans/details | Admin o support |
+
+---
+
+##  Configuración CORS
 
 ```python
-# User
-loans = relationship("Loan", back_populates="user")
-
-# Device
-loans = relationship("Loan", back_populates="device")
-
-# Loan
-user = relationship("User", back_populates="loans")
-device = relationship("Device", back_populates="loans")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 ```
-User (1) ──────< (N) Loan (N) >────── (1) Device
+
+**¿Por qué no usar `allow_origins=["*"]` junto con `allow_credentials=True`?**
+
+El estándar CORS prohíbe esta combinación porque, si cualquier origen pudiera enviar credenciales
+(cookies, tokens en headers), un sitio malicioso podría hacer peticiones autenticadas a la API en
+nombre de la víctima sin que ella lo note. Por eso los navegadores exigen una lista explícita de
+orígenes confiables cuando se permiten credenciales, en lugar de aceptar un comodín.
 
 ---
 
-## Endpoints — Users
+##  Middleware personalizado
 
-| Método | Endpoint | Descripción | Código |
-|--------|----------|-------------|--------|
-| GET | /api/v1/users | Lista usuarios | 200 |
-| GET | /api/v1/users/{user_id} | Obtiene usuario por ID | 200 |
-| GET | /api/v1/users/{user_id}/loans | Préstamos de un usuario | 200 |
-| POST | /api/v1/users | Crea usuario | 201 |
-| PUT | /api/v1/users/{user_id} | Actualiza usuario completo | 200 |
-| PATCH | /api/v1/users/{user_id} | Actualiza usuario parcial | 200 |
-| DELETE | /api/v1/users/{user_id} | Elimina usuario | 204 |
+Cada respuesta incluye estas cabeceras, generadas por `RequestLoggingMiddleware`:
+X-App-Name: device_systems
 
-## Endpoints — Devices
+X-Process-Time: 0.0042
 
-| Método | Endpoint | Descripción | Código |
-|--------|----------|-------------|--------|
-| GET | /api/v1/devices | Lista dispositivos (filtros: device_type, is_available, brand, search) | 200 |
-| GET | /api/v1/devices/{device_id} | Obtiene dispositivo por ID | 200 |
-| GET | /api/v1/devices/{device_id}/loans | Historial de préstamos del dispositivo | 200 |
-| POST | /api/v1/devices | Crea dispositivo | 201 |
-| PUT | /api/v1/devices/{device_id} | Actualiza dispositivo completo | 200 |
-| PATCH | /api/v1/devices/{device_id} | Actualiza dispositivo parcial | 200 |
-| DELETE | /api/v1/devices/{device_id} | Elimina dispositivo | 204 |
+X-Request-ID: 8f42e9c1
 
-##  Endpoints — Loans
+Además, cada petición se registra en consola con método, ruta y código de estado.
 
-| Método | Endpoint | Descripción | Código |
-|--------|----------|-------------|--------|
-| GET | /api/v1/loans | Lista préstamos (filtro por status) | 200 |
-| GET | /api/v1/loans/{loan_id} | Obtiene préstamo por ID | 200 |
-| GET | /api/v1/loans/details | Préstamos con info de usuario y dispositivo (joins) | 200 |
-| POST | /api/v1/loans | Crea préstamo (valida existencia y disponibilidad) | 201 |
-| PATCH | /api/v1/loans/{loan_id}/return | Devuelve un préstamo y libera el dispositivo | 200 |
+![Cabeceras Middleware](img/cabeceras_middleware.png)
 
 ---
 
-##  Evidencias funcionales
+##  Rate Limiting
 
-### Creación de usuario
-```json
-{ "name": "Ana Pérez", "email": "ana@sena.edu.co", "role": "user", "is_active": true }
-```
-![POST User](GetUsersV10)
+| Endpoint | Límite |
+|----------|--------|
+| POST /auth/login | 5 por minuto |
+| POST /auth/register | 3 por minuto |
+| GET /users | 30 por minuto |
+| POST /loans | 10 por minuto |
 
-### Creación de dispositivo
-```json
-{ "name": "Laptop Lenovo ThinkPad", "serial_number": "LEN-2024-001", "device_type": "laptop", "brand": "lenovo", "is_available": true }
-```
-![POST Device](GetDeviceV10)
+Al superar el límite, la API responde `429 Too Many Requests`.
 
-### Creación de préstamo
-```json
-{ "user_id": 1, "device_id": 1, "status": "active" }
-```
-![POST Loan](img/loans.png)
-
-### Consulta con joins — préstamos con información relacionada
-`GET /api/v1/loans/details`
-
-Esta consulta usa `join()` entre `Loan`, `User` y `Device`, retornando el detalle anidado de cada relación.
-![Loans Details](img/loans_details.png)
-
-### Filtros aplicados
-`GET /api/v1/loans?status=active`
-`GET /api/v1/devices?device_type=laptop`
-
-Los filtros usan `ilike()` para búsquedas insensibles a mayúsculas y `and_()`/`or_()` para combinar condiciones.
-![Filtro Loans](img/filtro_loans.png)
-
-### Devolución de dispositivo
-`PATCH /api/v1/loans/1/return`
-
-Marca el préstamo como `returned`, asigna `return_date` y libera el dispositivo (`is_available: true`).
-![Devolución Loan](img/devolucion_loan.png)
-
-### Verificación de disponibilidad tras devolución
-`GET /api/v1/devices/1`
-![Device Disponible](img/device_disponible.png)
+![Rate Limiting](img/rate_limiting.png)
 
 ---
 
-##  Manejo de errores
+## 📸 Evidencias de pruebas funcionales
+
+### Registro de usuario
+![Registro](img/registro_usuario.png)
+
+### Login y token generado
+![Login](img/login_token.png)
+
+### Consulta /auth/me
+![Auth Me](img/auth_me.png)
+
+### Acceso sin token
+![Sin Token](img/sin_token.png)
+
+### Acceso con rol no permitido
+![Rol No Permitido](img/rol_no_permitido.png)
+
+### Swagger/OpenAPI con OAuth2
+![Swagger OAuth2](img/swagger_oauth2.png)
+
+---
+
+## Manejo de errores
 
 | Caso | Código |
 |------|--------|
-| Registro creado | 201 Created |
-| Consulta exitosa | 200 OK |
+| Registro/creación exitosa | 201 Created |
+| Consulta/login exitosa | 200 OK |
 | Eliminación exitosa | 204 No Content |
-| Usuario/dispositivo/préstamo no encontrado | 404 Not Found |
-| Email o número de serie duplicado | 400 Bad Request |
-| Dispositivo no disponible / préstamo ya devuelto | 409 Conflict |
+| Recurso no encontrado | 404 Not Found |
+| Dato duplicado | 400 Bad Request |
+| Sin token / token inválido | 401 Unauthorized |
+| Sin permisos para la acción | 403 Forbidden |
+| Regla de negocio incumplida | 409 Conflict |
 | Error de validación | 422 Unprocessable Entity |
+| Límite de peticiones excedido | 429 Too Many Requests |
 
 ---
 
-## 💡 Reflexión
+##  Reflexión final
 
-Las migraciones con Alembic permiten versionar los cambios en la estructura de la base de datos de forma
-controlada y reproducible, evitando modificar tablas manualmente y facilitando el trabajo en equipo. Las
-relaciones entre modelos (`relationship()` y `ForeignKey`) permiten representar de forma natural cómo
-los datos del mundo real se conectan entre sí —en este caso, usuarios que solicitan dispositivos mediante
-préstamos—, manteniendo la integridad referencial de la base de datos. Las consultas avanzadas con `join()`,
-`and_()`, `or_()` e `ilike()` permiten construir respuestas enriquecidas que combinan información de varias
-tablas en una sola petición, evitando que el cliente tenga que hacer múltiples llamadas para obtener el
-contexto completo de un recurso. En conjunto, estas herramientas son fundamentales para construir APIs REST
-escalables y mantenibles en proyectos reales.
+La seguridad en una API REST no es un complemento opcional, sino una capa estructural que determina
+si el sistema puede usarse en un entorno real. Implementar autenticación con OAuth2 y JWT permite que
+cada cliente demuestre su identidad sin que el servidor tenga que recordar sesiones, lo cual escala mejor
+y se integra naturalmente con aplicaciones frontend modernas. El hash de contraseñas con bcrypt garantiza
+que, incluso si la base de datos fuera comprometida, las contraseñas originales de los usuarios permanezcan
+protegidas. La autorización basada en roles asegura que cada usuario solo pueda realizar las acciones que
+le corresponden, evitando que cualquier cuenta autenticada tenga acceso irrestricto. El middleware de
+trazabilidad y las cabeceras personalizadas facilitan la depuración y el monitoreo en producción, mientras
+que el rate limiting protege la API de abuso, fuerza bruta y ataques de denegación de servicio. Configurar
+CORS correctamente, sin combinar comodines con credenciales, evita exponer la API a peticiones maliciosas
+desde dominios no autorizados. En conjunto, estas prácticas transforman una API funcional en una API
+production-ready, capaz de proteger tanto los datos del sistema como la confianza de quienes la consumen.
