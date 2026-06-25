@@ -1,7 +1,3 @@
-Buena noticia: ambos lados tienen contenido valioso que no se solapa — la versión de main (HEAD) tiene toda la sección de Alembic/joins/relaciones de la actividad anterior, y la versión de device_systems_security tiene toda la parte de autenticación. Vamos a fusionarlos manualmente en un solo README completo que conserve todo.
-
-Reemplaza todo el contenido de README.md con esta versión unificada:
-markdown# device_systems API
 
 API REST construida con FastAPI, SQLAlchemy, Alembic y seguridad OAuth2/JWT para la gestión de usuarios, dispositivos y préstamos del sistema device_systems.
 
